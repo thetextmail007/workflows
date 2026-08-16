@@ -1,7 +1,9 @@
 name: UAE BOX OFFICE
 
 on:
-  workflow_dispatch:
+  schedule:
+    - cron: '*/40 * * * *'   # runs every 40 minutes
+  workflow_dispatch:          # allow manual trigger
 
 # 🔥 prevent overlapping runs
 concurrency:
@@ -11,6 +13,7 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 240      # 4-hour job cap
 
     strategy:
       fail-fast: false
@@ -41,7 +44,7 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
-            pip install curl_cffi aiohttp tabulate cryptography pycryptodome playwright
+            pip install curl_cffi aiohttp tabulate cryptography pycryptodome playwright requests cloudscraper pytz
           fi
           pip install playwright
 
@@ -55,7 +58,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-playwright-
 
-      # 📥 Install Playwright Chromium
+      # 📥 Install Playwright Chromium with dependencies
       - name: Install Playwright Chromium
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: python -m playwright install chromium --with-deps
@@ -93,7 +96,7 @@ jobs:
 
           git add data/ || true
 
-          git commit -m "[skip ci] ${{ matrix.mode }} update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
+          git commit -m "${{ matrix.mode }} update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
 
           sleep $((RANDOM % 10))
 
