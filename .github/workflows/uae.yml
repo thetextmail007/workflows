@@ -2,10 +2,9 @@ name: UAE BOX OFFICE
 
 on:
   schedule:
-    - cron: '*/40 * * * *'   # runs every 40 minutes
-  workflow_dispatch:          # allow manual trigger
+    - cron: '*/40 * * * *'
+  workflow_dispatch:
 
-# 🔥 prevent overlapping runs
 concurrency:
   group: uae-${{ github.ref }}
   cancel-in-progress: true
@@ -13,7 +12,7 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 240      # 4-hour job cap
+    timeout-minutes: 240
 
     strategy:
       fail-fast: false
@@ -24,102 +23,31 @@ jobs:
       REPO: thetextmail007/uae
       PYTHONDONTWRITEBYTECODE: "1"
       DISPLAY: :99
-      PLAYWRIGHT_BROWSERS_PATH: ~/.cache/ms-playwright
 
     steps:
-      # 🔒 Clone PRIVATE repo
       - name: Clone Private Repo
         run: |
           git clone --depth=1 https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ env.REPO }}.git
 
-      # 🐍 Setup Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      # 📦 Install system dependencies
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            xvfb \
-            libgbm-dev \
-            libasound2 \
-            libatk-bridge2.0-0 \
-            libgtk-3-0 \
-            libx11-xcb1 \
-            libxcb-dri3-0 \
-            libdrm2 \
-            libgbm1 \
-            libnss3 \
-            libxss1 \
-            libxcomposite1 \
-            libxdamage1 \
-            libxrandr2 \
-            libxtst6 \
-            libpango-1.0-0 \
-            libcairo2 \
-            libatspi2.0-0 \
-            libwayland-client0 \
-            libwayland-egl1 \
-            libgdk-pixbuf2.0-0 \
-            libxkbcommon0 \
-            libxkbfile1 \
-            libxcb-shm0 \
-            libxcb-icccm4 \
-            libxcb-image0 \
-            libxcb-keysyms1 \
-            libxcb-randr0 \
-            libxcb-render-util0 \
-            libxcb-xfixes0 \
-            libxcb-xinerama0 \
-            libxcb-xkb1 \
-            libxcb-xtest0 \
-            fonts-liberation \
-            libappindicator3-1 \
-            libdbus-1-3
-
-      # 📦 Install Python dependencies
       - name: Install dependencies
         run: |
           if [ -d "uae/gcc/uae" ]; then cd uae/gcc/uae; elif [ -d "uae" ]; then cd uae; elif [ -d "gcc/uae" ]; then cd gcc/uae; fi
           python -m pip install --upgrade pip
-          
-          # Install core dependencies
-          pip install playwright playwright-stealth tabulate requests cloudscraper
-          
-          # Install optional dependencies if available
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
-
-      # 💾 Cache Playwright browsers
-      - name: Cache Playwright Browsers
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
-
-      # 📥 Install Playwright Chromium with dependencies
-      - name: Install Playwright Chromium
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: |
-          python -m playwright install chromium --with-deps
+          pip install playwright tabulate requests
+          python -m playwright install chromium
           python -m playwright install-deps
 
-      # 🎬 Start Xvfb
       - name: Start Xvfb
         run: |
-          Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
+          Xvfb :99 -screen 0 1920x1080x24 &
           sleep 3
-          export DISPLAY=:99
           echo "DISPLAY=:99" >> $GITHUB_ENV
 
-      # 🎬 Run scraper
       - name: Run scraper
         run: |
           if [ -d "uae/gcc/uae" ]; then cd uae/gcc/uae; elif [ -d "uae" ]; then cd uae; elif [ -d "gcc/uae" ]; then cd gcc/uae; fi
@@ -130,48 +58,30 @@ jobs:
 
           for i in {1..6}; do
             echo "Attempt $i"
-            echo "Date: $DATE"
-
-            # Run with xvfb
             if xvfb-run -a python uae.py --mode "$MODE" --date "$DATE"; then
               echo "✅ Scraper finished successfully"
               break
             fi
-
             echo "❌ Scraper failed. Retrying in 15 seconds..."
             sleep 15
           done
 
-      # 💾 Commit & Push
       - name: Commit scraper data
         run: |
           if [ -d "uae/gcc/uae" ]; then cd uae/gcc/uae; elif [ -d "uae" ]; then cd uae; elif [ -d "gcc/uae" ]; then cd gcc/uae; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # Remove __pycache__ folders and untrack them if previously tracked in repo
-          find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-          git rm -rf --cached __pycache__ 2>/dev/null || true
-
+          
           git add data/ || true
-
           git commit -m "${{ matrix.mode }} update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
-
-          sleep $((RANDOM % 10))
-
+          
           for i in {1..5}; do
             echo "Push attempt $i"
-
-            git rebase --abort 2>/dev/null || true
             git pull --rebase --autostash origin main || true
-            find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-            git rm -rf --cached __pycache__ 2>/dev/null || true
-
             if git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ env.REPO }}.git; then
               echo "✅ Push succeeded"
               break
             fi
-
             echo "❌ Push failed. Retrying in 5 seconds..."
             sleep 5
           done
