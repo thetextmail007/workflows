@@ -1,0 +1,115 @@
+name: UAE BOX OFFICE
+
+on:
+  workflow_dispatch:
+
+# 🔥 prevent overlapping runs
+concurrency:
+  group: uae-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [daily, advance]
+
+    env:
+      REPO: thetextmail007/uae
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    steps:
+      # 🔒 Clone PRIVATE repo
+      - name: Clone Private Repo
+        run: |
+          git clone --depth=1 https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ env.REPO }}.git
+
+      # 🐍 Setup Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 📦 Install dependencies
+      - name: Install dependencies
+        run: |
+          if [ -d "uae/gcc/uae" ]; then cd uae/gcc/uae; elif [ -d "uae" ]; then cd uae; elif [ -d "gcc/uae" ]; then cd gcc/uae; fi
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install curl_cffi aiohttp tabulate cryptography pycryptodome playwright
+          fi
+          pip install playwright
+
+      # 💾 Cache Playwright browsers
+      - name: Cache Playwright Browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      # 📥 Install Playwright Chromium
+      - name: Install Playwright Chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: python -m playwright install chromium --with-deps
+
+      # 🎬 Run scraper
+      - name: Run scraper
+        run: |
+          if [ -d "uae/gcc/uae" ]; then cd uae/gcc/uae; elif [ -d "uae" ]; then cd uae; elif [ -d "gcc/uae" ]; then cd gcc/uae; fi
+          MODE="${{ matrix.mode }}"
+
+          echo "🎬 Running uae.py with mode $MODE"
+
+          for i in {1..6}; do
+            echo "Attempt $i"
+
+            if xvfb-run -a python uae.py --mode "$MODE"; then
+              echo "✅ Scraper finished successfully"
+              break
+            fi
+
+            echo "❌ Scraper failed. Retrying in 10 seconds..."
+            sleep 10
+          done
+
+      # 💾 Commit & Push
+      - name: Commit scraper data
+        run: |
+          if [ -d "uae/gcc/uae" ]; then cd uae/gcc/uae; elif [ -d "uae" ]; then cd uae; elif [ -d "gcc/uae" ]; then cd gcc/uae; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Remove __pycache__ folders and untrack them if previously tracked in repo
+          find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          git rm -rf --cached __pycache__ 2>/dev/null || true
+
+          git add data/ || true
+
+          git commit -m "[skip ci] ${{ matrix.mode }} update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
+
+          sleep $((RANDOM % 10))
+
+          for i in {1..5}; do
+            echo "Push attempt $i"
+
+            git rebase --abort 2>/dev/null || true
+            git pull --rebase --autostash origin main || true
+            find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+            git rm -rf --cached __pycache__ 2>/dev/null || true
+
+            if git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ env.REPO }}.git; then
+              echo "✅ Push succeeded"
+              break
+            fi
+
+            echo "❌ Push failed. Retrying in 5 seconds..."
+            sleep 5
+          done
