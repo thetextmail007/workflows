@@ -7,7 +7,7 @@ on:
 
 # 🔥 prevent overlapping runs
 concurrency:
-  group: uae-target-${{ github.ref }}-${{ matrix.date }}
+  group: uae-target-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
