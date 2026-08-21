@@ -74,7 +74,7 @@ jobs:
           for i in {1..6}; do
             echo "Attempt $i"
 
-            if xvfb-run -a python cinepolisgulf.py --mode "$MODE"; then
+            if xvfb-run -a python uae.py --mode "$MODE"; then
               echo "✅ Scraper finished successfully"
               break
             fi
