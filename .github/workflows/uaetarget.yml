@@ -7,7 +7,7 @@ on:
 
 # 🔥 prevent overlapping runs
 concurrency:
-  group: uae-target-${{ github.ref }}
+  group: uae-target-${{ github.ref }}-${{ matrix.date }}
   cancel-in-progress: true
 
 jobs:
@@ -29,6 +29,18 @@ jobs:
       - name: Clone Private Repo
         run: |
           git clone --depth=1 https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ env.REPO }}.git
+
+      # 🚀 Start FlareSolverr Service to Bypass Cloudflare
+      - name: Start FlareSolverr Service
+        run: |
+          docker run -d \
+            --name=flaresolverr \
+            -p 8191:8191 \
+            -e LOG_LEVEL=info \
+            --restart unless-stopped \
+            ghcr.io/flaresolverr/flaresolverr:latest
+          echo "Waiting for FlareSolverr service to initialize..."
+          sleep 10
 
       # 🐍 Setup Python
       - name: Set up Python
