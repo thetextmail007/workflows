@@ -1,0 +1,145 @@
+name: GERMANY
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'   # runs every 3 hours
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Tracking Mode'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - advance
+          - both
+      all_movies:
+        description: 'Track All Movies (true) or Only Indian Movies (false)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    concurrency:
+      group: germany-${{ github.ref }}-${{ matrix.mode }}-${{ github.event.inputs.all_movies || 'default' }}
+      cancel-in-progress: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [daily, advance]
+
+    env:
+      REPO: thetextmail007/germany
+      ALL_MOVIES: ${{ github.event.inputs.all_movies || 'false' }}
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT || github.token }}
+
+      - name: Ensure Directory Context
+        run: |
+          if [ ! -d "germany" ] && [ -n "${{ secrets.GH_PAT }}" ]; then
+            git clone --depth=1 https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ env.REPO }}.git germany || true
+          fi
+
+      - name: Install System Dependencies (xvfb & browser libs)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libpangocairo-1.0-0 libxss1 libgtk-3-0 libasound2* || sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libasound2 libpangocairo-1.0-0 libxss1 libgtk-3-0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Node dependencies for Cloudflare bypass
+        run: |
+          DIR="germany/mcp-chrome-cloudflare-bypass"
+          if [ ! -d "$DIR" ] && [ -d "mcp-chrome-cloudflare-bypass" ]; then
+            DIR="mcp-chrome-cloudflare-bypass"
+          fi
+          if [ -d "$DIR" ]; then
+            cd "$DIR"
+            npm install --production
+          fi
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -d "germany" ]; then cd germany; fi
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests aiohttp beautifulsoup4 curl_cffi httpx tabulate tzdata
+          fi
+
+      - name: Run Germany Scraper (xvfb-run)
+        run: |
+          if [ -d "germany" ]; then cd germany; fi
+          MODE="${{ matrix.mode }}"
+          
+          # Skip if workflow_dispatch selected a specific single mode
+          SELECTED="${{ github.event.inputs.mode }}"
+          if [ -n "$SELECTED" ] && [ "$SELECTED" != "both" ] && [ "$SELECTED" != "$MODE" ]; then
+            echo "⏭️ Skipping $MODE as $SELECTED was explicitly requested."
+            exit 0
+          fi
+
+          CMD="xvfb-run -a python germany.py --mode $MODE"
+          if [ "${{ github.event.inputs.all_movies }}" = "true" ] || [ "$ALL_MOVIES" = "true" ]; then
+            CMD="$CMD --all-movies"
+          fi
+
+          echo "🎬 Running Germany Box Office Tracker — mode: $MODE (Command: $CMD)"
+          for i in {1..5}; do
+            echo "Attempt $i"
+            if $CMD; then
+              echo "✅ Scraper finished successfully"
+              break
+            fi
+            echo "❌ Scraper failed. Retrying in 10 seconds..."
+            sleep 10
+          done
+
+      - name: Commit and Push Data
+        run: |
+          if [ -d "germany" ]; then cd germany; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          git rm -rf --cached __pycache__ 2>/dev/null || true
+
+          git add data/ || true
+          git commit -m "germany ${{ matrix.mode }} update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes to commit"
+
+          sleep $((RANDOM % 10))
+
+          for i in {1..5}; do
+            echo "Push attempt $i"
+            git rebase --abort 2>/dev/null || true
+            git pull --rebase -X theirs --autostash origin main || git pull --rebase --autostash origin main || true
+            find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+            git rm -rf --cached __pycache__ 2>/dev/null || true
+
+            if git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ env.REPO }}.git || git push origin HEAD || git push; then
+              echo "✅ Push succeeded"
+              break
+            fi
+            echo "❌ Push failed. Retrying in 5 seconds..."
+            sleep 5
+          done
