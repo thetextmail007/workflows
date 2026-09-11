@@ -18,7 +18,7 @@ jobs:
     env:
       REPO: thetextmail007/uk
       TARGET_DATE: "20260923"    # ← Hardcoded target date (YYYYMMDD)
-      DAYS: "7"                  # Target window (next 7 days)
+      DAYS: "2"                  # Target window (next 7 days)
       PYTHONDONTWRITEBYTECODE: "1"
 
     steps:
