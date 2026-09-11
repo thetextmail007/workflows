@@ -7,11 +7,8 @@ on:
 
 # Prevent overlapping runs
 concurrency:
-  group: uk-target-${{ github.ref }}-${{ github.event.inputs.target_date || 'default' }}
+  group: uk-target-${{ github.ref }}
   cancel-in-progress: true
-
-permissions:
-  contents: write
 
 jobs:
   scrape:
@@ -19,16 +16,18 @@ jobs:
     timeout-minutes: 240
 
     env:
+      REPO: thetextmail007/uk
       TARGET_DATE: "20260923"    # ← Hardcoded target date (YYYYMMDD)
       DAYS: "7"                  # Target window (next 7 days)
       PYTHONDONTWRITEBYTECODE: "1"
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GH_PAT || github.token }}
+      # 🔒 Clone PRIVATE repo
+      - name: Clone Private Repo
+        run: |
+          git clone --depth=1 https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ env.REPO }}.git
 
+      # 💻 Install System Dependencies (xvfb & Google Chrome)
       - name: Install System Dependencies (xvfb & Google Chrome)
         run: |
           sudo apt-get update
@@ -42,25 +41,23 @@ jobs:
           fi
           google-chrome --version || which google-chrome || true
 
+      # 🐍 Setup Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+      # 🟢 Setup Node.js
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
+      # 📦 Install Node dependencies for Cloudflare bypass
       - name: Install Node dependencies for Cloudflare bypass
         run: |
-          DIR="uk/mcp-chrome-cloudflare-bypass"
-          if [ ! -d "$DIR" ] && [ -d "mcp-chrome-cloudflare-bypass" ]; then
-            DIR="mcp-chrome-cloudflare-bypass"
-          fi
-          if [ ! -d "$DIR" ] && [ -d "germany/mcp-chrome-cloudflare-bypass" ]; then
-            DIR="germany/mcp-chrome-cloudflare-bypass"
-          fi
+          if [ -d "uk" ]; then cd uk; fi
+          DIR="mcp-chrome-cloudflare-bypass"
           if [ -d "$DIR" ]; then
             echo "Installing dependencies in $DIR..."
             cd "$DIR"
@@ -69,15 +66,17 @@ jobs:
             echo "Warning: Bypass directory not found."
           fi
 
+      # 📦 Install Python dependencies
       - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
           if [ -d "uk" ]; then cd uk; fi
+          python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
           pip install requests aiohttp cloudscraper playwright tabulate tzdata
 
+      # 🎬 Run Scrapers
       - name: Run UK Target Date Scrapers (Next 7 Days)
         run: |
           if [ -d "uk" ]; then cd uk; fi
@@ -96,8 +95,8 @@ jobs:
           UK_TZ = ZoneInfo("Europe/London")
           today = datetime.now(UK_TZ).date()
 
-          custom_date = (os.environ.get("INPUT_TARGET_DATE") or os.environ.get("TARGET_DATE") or "").strip()
-          custom_days = (os.environ.get("INPUT_DAYS") or os.environ.get("DAYS") or "7").strip()
+          custom_date = os.environ.get("TARGET_DATE", "").strip()
+          custom_days = os.environ.get("DAYS", "7").strip()
 
           try:
               num_days = int(custom_days)
@@ -122,29 +121,35 @@ jobs:
               if res.returncode != 0:
                   print(f"⚠️ Non-zero exit code for {d}: {res.returncode}")
           EOF
-        env:
-          INPUT_TARGET_DATE: ${{ github.event.inputs.target_date }}
-          INPUT_DAYS: ${{ github.event.inputs.days || '7' }}
 
-      - name: Commit and Push Data
+      # 💾 Commit & Push
+      - name: Commit scraper data
         run: |
           if [ -d "uk" ]; then cd uk; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          # Remove __pycache__ folders and untrack them if previously tracked in repo
           find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
           git rm -rf --cached __pycache__ 2>/dev/null || true
 
           git add data/ || true
-          git commit -m "UK Target Date (+7 days) update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes to commit"
+
+          git commit -m "target=${TARGET_DATE} advance ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
+
+          sleep $((RANDOM % 10))
 
           for i in {1..5}; do
             echo "Push attempt $i"
-            git pull --rebase --autostash origin main || git pull --rebase origin main || true
-            if git push origin HEAD || git push; then
+            git rebase --abort 2>/dev/null || true
+            git pull --rebase --autostash origin main || true
+            find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+            git rm -rf --cached __pycache__ 2>/dev/null || true
+
+            if git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ env.REPO }}.git; then
               echo "✅ Push succeeded"
               break
             fi
-            echo "❌ Push failed. Retrying in 5 seconds..."
+            echo "❌ Push failed. Retrying in 5s..."
             sleep 5
           done
