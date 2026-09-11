@@ -1,0 +1,167 @@
+name: GERMANY TARGET DATE
+
+on:
+  schedule:
+    - cron: '* */2 * * *'   # runs every 45 minutes
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: 'Target Date (YYYY-MM-DD or YYYYMMDD)'
+        required: false
+        default: '2026-09-23'
+      movie:
+        description: 'Target Movie Title Filter'
+        required: false
+        default: 'The Paradise'
+      days:
+        description: 'Days to Fetch (Default: 15 for target advance tracking)'
+        required: false
+        default: '15'
+      all_movies:
+        description: 'Track All Movies (true) or Only Indian Movies (false)'
+        required: false
+        default: false
+        type: boolean
+
+# 🔥 prevent overlapping runs
+concurrency:
+  group: germany-target-${{ github.ref }}-${{ github.event.inputs.target_date || 'default' }}-${{ github.event.inputs.all_movies || 'default' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    env:
+      REPO: thetextmail007/germany
+      ALL_MOVIES: ${{ github.event.inputs.all_movies || 'false' }}
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT || github.token }}
+
+      - name: Ensure Directory Context
+        run: |
+          if [ ! -f "germany.py" ] && [ ! -d "germany" ] && [ -n "${{ secrets.GH_PAT }}" ]; then
+            git clone --depth=1 https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ env.REPO }}.git germany || true
+          fi
+
+      - name: Install System Dependencies (xvfb & browser libs)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libpangocairo-1.0-0 libxss1 libgtk-3-0 libasound2* || sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libasound2 libpangocairo-1.0-0 libxss1 libgtk-3-0
+          if ! command -v google-chrome &> /dev/null; then
+            echo "Installing Google Chrome..."
+            wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+            sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+            sudo apt-get update
+            sudo apt-get install -y google-chrome-stable || true
+          fi
+          google-chrome --version || which google-chrome || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Node dependencies for Cloudflare bypass
+        run: |
+          DIR="germany/mcp-chrome-cloudflare-bypass"
+          if [ ! -d "$DIR" ] && [ -d "mcp-chrome-cloudflare-bypass" ]; then
+            DIR="mcp-chrome-cloudflare-bypass"
+          fi
+          if [ -d "$DIR" ]; then
+            cd "$DIR"
+            npm install --production
+          fi
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -d "germany" ]; then cd germany; fi
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests aiohttp beautifulsoup4 curl_cffi httpx tabulate tzdata
+          fi
+
+      - name: Run Germany Target Date Scraper (xvfb-run)
+        run: |
+          if [ -d "germany" ]; then cd germany; fi
+
+          TARGET_DATE="${{ github.event.inputs.target_date }}"
+          if [ -z "$TARGET_DATE" ]; then
+            TARGET_DATE="2026-09-23"
+          fi
+
+          TARGET_MOVIE="${{ github.event.inputs.movie }}"
+          if [ -z "$TARGET_MOVIE" ]; then
+            TARGET_MOVIE="The Paradise"
+          fi
+
+          DAYS="${{ github.event.inputs.days }}"
+          if [ -z "$DAYS" ]; then
+            DAYS="15"
+          fi
+
+          CMD="python germany.py --mode advance --date $TARGET_DATE --days $DAYS --movie \"$TARGET_MOVIE\""
+
+          if [ "${{ github.event.inputs.all_movies }}" = "true" ] || [ "$ALL_MOVIES" = "true" ]; then
+            CMD="$CMD --all-movies"
+          fi
+
+          sudo mkdir -p /tmp/.X11-unix
+          sudo chmod 1777 /tmp/.X11-unix
+
+          echo "🎬 Executing: xvfb-run -a $CMD"
+          for i in {1..5}; do
+            echo "Attempt $i"
+            if xvfb-run -a -s "-screen 0 1920x1080x24 -ac" $CMD; then
+              echo "✅ Scraper finished successfully"
+              break
+            fi
+            echo "❌ Scraper failed. Retrying in 10 seconds..."
+            sleep 10
+          done
+
+      - name: Commit and Push Data
+        run: |
+          if [ -d "germany" ]; then cd germany; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          git rm -rf --cached __pycache__ 2>/dev/null || true
+
+          git add data/ || true
+          git commit -m "germany target date update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes to commit"
+
+          sleep $((RANDOM % 10))
+
+          for i in {1..5}; do
+            echo "Push attempt $i"
+            git rebase --abort 2>/dev/null || true
+            git pull --rebase -X theirs --autostash origin main || git pull --rebase --autostash origin main || true
+            find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+            git rm -rf --cached __pycache__ 2>/dev/null || true
+
+            AUTH_TOKEN="${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}"
+            if git push "https://x-access-token:${AUTH_TOKEN}@github.com/${{ env.REPO }}.git" HEAD:main || git push origin HEAD || git push; then
+              echo "✅ Push succeeded"
+              break
+            fi
+            echo "❌ Push failed. Retrying in 5 seconds..."
+            sleep 5
+          done
