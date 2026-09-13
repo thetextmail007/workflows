@@ -2,7 +2,7 @@ name: UK TARGET DATE
 
 on:
   schedule:
-    - cron: '0 */4 * * *'   # runs every 4 hours
+    - cron: '0 */2 * * *'   # runs every 4 hours
   workflow_dispatch:
 
 # Prevent overlapping runs
