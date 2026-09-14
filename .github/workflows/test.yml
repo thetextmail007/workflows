@@ -1,0 +1,124 @@
+name: Test ProxyBridge & Cinepolis API
+
+on:
+  workflow_dispatch:
+    inputs:
+      proxy_url:
+        description: 'Proxy URL for ProxyBridge (format: http://user:pass@host:port or socks5://host:port)'
+        required: false
+        default: 'http://srludcki:bpxkc8wa3dj0@31.59.20.176:6754'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install curl_cffi and requests
+        run: |
+          pip install curl_cffi requests
+
+      # Test 1: Direct request from GitHub Actions Runner IP (Azure Datacenter)
+      - name: Test 1 - Direct Request (Expect 403)
+        run: |
+          echo "=== 1. Testing direct request from GitHub Runner IP ==="
+          python -c "
+          import requests
+          url = 'https://api.cinepolisgulf.com/api/v2/home/advancebooking-v2/?country_id=2'
+          try:
+              r = requests.get(url, timeout=10)
+              print(f'Status: {r.status_code}')
+              print(f'Response snippet: {r.text[:300]}')
+          except Exception as e:
+              print(f'Error: {e}')
+          " || true
+
+      # Test 2: Direct request with curl_cffi and Chrome TLS impersonation (Direct Datacenter IP)
+      - name: Test 2 - curl_cffi Direct (No Proxy)
+        run: |
+          echo "=== 2. Testing curl_cffi Chrome impersonation without proxy ==="
+          python -c "
+          from curl_cffi import requests
+          url = 'https://api.cinepolisgulf.com/api/v2/home/advancebooking-v2/?country_id=2'
+          headers = {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+              'Accept': 'application/json, text/plain, */*',
+              'Origin': 'https://oman.cinepolisgulf.com',
+              'Referer': 'https://oman.cinepolisgulf.com/',
+          }
+          try:
+              r = requests.get(url, headers=headers, impersonate='chrome124', timeout=10)
+              print(f'Status: {r.status_code}')
+              print(f'Response snippet: {r.text[:300]}')
+          except Exception as e:
+              print(f'Error: {e}')
+          " || true
+
+      # Test 3: curl_cffi with Webshare Proxy directly in Python
+      - name: Test 3 - curl_cffi with Upstream Proxy directly
+        run: |
+          echo "=== 3. Testing curl_cffi passing proxy directly ==="
+          python -c "
+          from curl_cffi import requests
+          url = 'https://api.cinepolisgulf.com/api/v2/home/advancebooking-v2/?country_id=2'
+          proxy = '${{ github.event.inputs.proxy_url }}'
+          headers = {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+              'Accept': 'application/json, text/plain, */*',
+              'Origin': 'https://oman.cinepolisgulf.com',
+              'Referer': 'https://oman.cinepolisgulf.com/',
+          }
+          try:
+              r = requests.get(url, headers=headers, proxies={'http': proxy, 'https': proxy}, impersonate='chrome124', timeout=15)
+              print(f'Status: {r.status_code}')
+              print(f'Response snippet: {r.text[:300]}')
+          except Exception as e:
+              print(f'Error: {e}')
+          " || true
+
+      # Test 4: Download and install ProxyBridge Linux build (v3.2.0)
+      - name: Test 4 - Install and Test ProxyBridge CLI
+        run: |
+          echo "=== 4. Downloading ProxyBridge Linux v3.2.0 ==="
+          curl -sL -o ProxyBridge-Linux.tar.gz "https://github.com/InterceptSuite/ProxyBridge/releases/download/v3.2.0/ProxyBridge-Linux-v3.2.0.tar.gz"
+          mkdir -p pb_install && tar -xzf ProxyBridge-Linux.tar.gz -C pb_install
+          cd pb_install
+
+          echo "Installing dependencies..."
+          sudo apt-get update -qq
+          sudo apt-get install -y libnetfilter-queue1 libnetfilter-queue-dev iptables || true
+
+          if [ -f setup.sh ]; then
+            sudo bash setup.sh || true
+          fi
+
+          echo "Checking ProxyBridge binary..."
+          which ProxyBridge || true
+          if command -v ProxyBridge &>/dev/null; then
+            echo "ProxyBridge version / help:"
+            sudo ProxyBridge --help || true
+
+            # Format proxy for ProxyBridge: type://ip:port:user:pass
+            # Input format: http://srludcki:bpxkc8wa3dj0@31.59.20.176:6754
+            PB_PROXY="http://31.59.20.176:6754:srludcki:bpxkc8wa3dj0"
+            echo "Starting ProxyBridge with rule for curl & python..."
+            sudo ProxyBridge --proxy "$PB_PROXY" --rule "curl;python;python3:*:*:TCP:PROXY" &
+            PB_PID=$!
+            sleep 3
+
+            echo "Testing curl through ProxyBridge transparent redirect:"
+            curl -sI "https://api.cinepolisgulf.com/api/v2/home/advancebooking-v2/?country_id=2" || true
+
+            echo "Cleaning up ProxyBridge..."
+            sudo kill -9 $PB_PID || true
+            sudo ProxyBridge --cleanup || true
+          else
+            echo "ProxyBridge binary was not found or failed to install."
+          fi
