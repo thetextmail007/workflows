@@ -1,124 +1,160 @@
-name: Test ProxyBridge & Cinepolis API
+name: GERMANY
 
 on:
+  schedule:
+    - cron: '0 */3 * * *'   # runs every 3 hours
   workflow_dispatch:
     inputs:
-      proxy_url:
-        description: 'Proxy URL for ProxyBridge (format: http://user:pass@host:port or socks5://host:port)'
+      mode:
+        description: 'Tracking Mode'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - advance
+          - both
+      all_movies:
+        description: 'Track All Movies (true) or Only Indian Movies (false)'
         required: false
-        default: 'http://srludcki:bpxkc8wa3dj0@31.59.20.176:6754'
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
 
 jobs:
-  test:
+  scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    concurrency:
+      group: germany-${{ github.ref }}-${{ matrix.mode }}-${{ github.event.inputs.all_movies || 'default' }}
+      cancel-in-progress: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [daily, advance]
+
+    env:
+      REPO: thetextmail007/germany
+      ALL_MOVIES: ${{ github.event.inputs.all_movies || 'false' }}
+      PYTHONDONTWRITEBYTECODE: "1"
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT || github.token }}
+
+      - name: Ensure Directory Context
+        run: |
+          if [ ! -f "germany.py" ] && [ ! -d "germany" ] && [ -n "${{ secrets.GH_PAT }}" ]; then
+            git clone --depth=1 https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ env.REPO }}.git germany || true
+          fi
+
+      - name: Install System Dependencies (xvfb & browser libs)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libpangocairo-1.0-0 libxss1 libgtk-3-0 libasound2* || sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libasound2 libpangocairo-1.0-0 libxss1 libgtk-3-0
+          if ! command -v google-chrome &> /dev/null; then
+            echo "Installing Google Chrome..."
+            wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+            sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+            sudo apt-get update
+            sudo apt-get install -y google-chrome-stable || true
+          fi
+          google-chrome --version || which google-chrome || true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install curl_cffi and requests
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Node dependencies for Cloudflare bypass
         run: |
-          pip install curl_cffi requests
-
-      # Test 1: Direct request from GitHub Actions Runner IP (Azure Datacenter)
-      - name: Test 1 - Direct Request (Expect 403)
-        run: |
-          echo "=== 1. Testing direct request from GitHub Runner IP ==="
-          python -c "
-          import requests
-          url = 'https://api.cinepolisgulf.com/api/v2/home/advancebooking-v2/?country_id=2'
-          try:
-              r = requests.get(url, timeout=10)
-              print(f'Status: {r.status_code}')
-              print(f'Response snippet: {r.text[:300]}')
-          except Exception as e:
-              print(f'Error: {e}')
-          " || true
-
-      # Test 2: Direct request with curl_cffi and Chrome TLS impersonation (Direct Datacenter IP)
-      - name: Test 2 - curl_cffi Direct (No Proxy)
-        run: |
-          echo "=== 2. Testing curl_cffi Chrome impersonation without proxy ==="
-          python -c "
-          from curl_cffi import requests
-          url = 'https://api.cinepolisgulf.com/api/v2/home/advancebooking-v2/?country_id=2'
-          headers = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-              'Accept': 'application/json, text/plain, */*',
-              'Origin': 'https://oman.cinepolisgulf.com',
-              'Referer': 'https://oman.cinepolisgulf.com/',
-          }
-          try:
-              r = requests.get(url, headers=headers, impersonate='chrome124', timeout=10)
-              print(f'Status: {r.status_code}')
-              print(f'Response snippet: {r.text[:300]}')
-          except Exception as e:
-              print(f'Error: {e}')
-          " || true
-
-      # Test 3: curl_cffi with Webshare Proxy directly in Python
-      - name: Test 3 - curl_cffi with Upstream Proxy directly
-        run: |
-          echo "=== 3. Testing curl_cffi passing proxy directly ==="
-          python -c "
-          from curl_cffi import requests
-          url = 'https://api.cinepolisgulf.com/api/v2/home/advancebooking-v2/?country_id=2'
-          proxy = '${{ github.event.inputs.proxy_url }}'
-          headers = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-              'Accept': 'application/json, text/plain, */*',
-              'Origin': 'https://oman.cinepolisgulf.com',
-              'Referer': 'https://oman.cinepolisgulf.com/',
-          }
-          try:
-              r = requests.get(url, headers=headers, proxies={'http': proxy, 'https': proxy}, impersonate='chrome124', timeout=15)
-              print(f'Status: {r.status_code}')
-              print(f'Response snippet: {r.text[:300]}')
-          except Exception as e:
-              print(f'Error: {e}')
-          " || true
-
-      # Test 4: Download and install ProxyBridge Linux build (v3.2.0)
-      - name: Test 4 - Install and Test ProxyBridge CLI
-        run: |
-          echo "=== 4. Downloading ProxyBridge Linux v3.2.0 ==="
-          curl -sL -o ProxyBridge-Linux.tar.gz "https://github.com/InterceptSuite/ProxyBridge/releases/download/v3.2.0/ProxyBridge-Linux-v3.2.0.tar.gz"
-          mkdir -p pb_install && tar -xzf ProxyBridge-Linux.tar.gz -C pb_install
-          cd pb_install
-
-          echo "Installing dependencies..."
-          sudo apt-get update -qq
-          sudo apt-get install -y libnetfilter-queue1 libnetfilter-queue-dev iptables || true
-
-          if [ -f setup.sh ]; then
-            sudo bash setup.sh || true
+          DIR="germany/mcp-chrome-cloudflare-bypass"
+          if [ ! -d "$DIR" ] && [ -d "mcp-chrome-cloudflare-bypass" ]; then
+            DIR="mcp-chrome-cloudflare-bypass"
+          fi
+          if [ -d "$DIR" ]; then
+            cd "$DIR"
+            npm install --production
           fi
 
-          echo "Checking ProxyBridge binary..."
-          which ProxyBridge || true
-          if command -v ProxyBridge &>/dev/null; then
-            echo "ProxyBridge version / help:"
-            sudo ProxyBridge --help || true
-
-            # Format proxy for ProxyBridge: type://ip:port:user:pass
-            # Input format: http://srludcki:bpxkc8wa3dj0@31.59.20.176:6754
-            PB_PROXY="http://31.59.20.176:6754:srludcki:bpxkc8wa3dj0"
-            echo "Starting ProxyBridge with rule for curl & python..."
-            sudo ProxyBridge --proxy "$PB_PROXY" --rule "curl;python;python3:*:*:TCP:PROXY" &
-            PB_PID=$!
-            sleep 3
-
-            echo "Testing curl through ProxyBridge transparent redirect:"
-            curl -sI "https://api.cinepolisgulf.com/api/v2/home/advancebooking-v2/?country_id=2" || true
-
-            echo "Cleaning up ProxyBridge..."
-            sudo kill -9 $PB_PID || true
-            sudo ProxyBridge --cleanup || true
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -d "germany" ]; then cd germany; fi
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
           else
-            echo "ProxyBridge binary was not found or failed to install."
+            pip install requests aiohttp beautifulsoup4 curl_cffi httpx tabulate tzdata
           fi
+
+      - name: Run Germany Scraper (xvfb-run)
+        run: |
+          if [ -d "germany" ]; then cd germany; fi
+          MODE="${{ matrix.mode }}"
+          
+          # Skip if workflow_dispatch selected a specific single mode
+          SELECTED="${{ github.event.inputs.mode }}"
+          if [ -n "$SELECTED" ] && [ "$SELECTED" != "both" ] && [ "$SELECTED" != "$MODE" ]; then
+            echo "⏭️ Skipping $MODE as $SELECTED was explicitly requested."
+            exit 0
+          fi
+
+          sudo mkdir -p /tmp/.X11-unix
+          sudo chmod 1777 /tmp/.X11-unix
+
+          CMD="python germany.py --mode $MODE"
+          if [ "${{ github.event.inputs.all_movies }}" = "true" ] || [ "$ALL_MOVIES" = "true" ]; then
+            CMD="$CMD --all-movies"
+          fi
+
+          echo "🎬 Running Germany Box Office Tracker — mode: $MODE (Command: $CMD)"
+          for i in {1..5}; do
+            echo "Attempt $i"
+            if xvfb-run -a -s "-screen 0 1920x1080x24 -ac" $CMD; then
+              echo "✅ Scraper finished successfully"
+              break
+            fi
+            echo "❌ Scraper failed. Retrying in 10 seconds..."
+            sleep 10
+          done
+
+      - name: Commit and Push Data
+        run: |
+          if [ -d "germany" ]; then cd germany; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          git rm -rf --cached __pycache__ 2>/dev/null || true
+
+          git add data/ || true
+          git commit -m "germany ${{ matrix.mode }} update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes to commit"
+
+          sleep $((RANDOM % 10))
+
+          for i in {1..5}; do
+            echo "Push attempt $i"
+            git rebase --abort 2>/dev/null || true
+            git pull --rebase -X theirs --autostash origin main || git pull --rebase --autostash origin main || true
+            find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+            git rm -rf --cached __pycache__ 2>/dev/null || true
+
+            AUTH_TOKEN="${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}"
+            if git push "https://x-access-token:${AUTH_TOKEN}@github.com/${{ env.REPO }}.git" HEAD:main || git push origin HEAD || git push; then
+              echo "✅ Push succeeded"
+              break
+            fi
+            echo "❌ Push failed. Retrying in 5 seconds..."
+            sleep 5
+          done
