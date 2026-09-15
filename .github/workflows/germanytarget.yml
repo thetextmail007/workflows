@@ -4,28 +4,10 @@ on:
   schedule:
     - cron: '*/45 * * * *'   # runs every 45 minutes
   workflow_dispatch:
-    inputs:
-      target_date:
-        description: 'Target Date (YYYY-MM-DD or YYYYMMDD)'
-        required: false
-        default: ''
-      movie:
-        description: 'Target Movie Title Filter (Leave empty for all movies)'
-        required: false
-        default: ''
-      days:
-        description: 'Days to Fetch (Default: 10 for advance mode)'
-        required: false
-        default: '10'
-      all_movies:
-        description: 'Track All Movies (true) or Only Indian Movies (false)'
-        required: false
-        default: false
-        type: boolean
 
 # 🔥 prevent overlapping runs
 concurrency:
-  group: germany-target-${{ github.ref }}-${{ github.event.inputs.target_date || 'default' }}-${{ github.event.inputs.all_movies || 'default' }}
+  group: germany-target-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -38,7 +20,6 @@ jobs:
 
     env:
       REPO: thetextmail007/germany
-      ALL_MOVIES: ${{ github.event.inputs.all_movies || 'false' }}
       PYTHONDONTWRITEBYTECODE: "1"
 
     steps:
@@ -101,19 +82,16 @@ jobs:
         run: |
           if [ -d "germany" ]; then cd germany; fi
 
-          CMD=(python germany.py --mode advance)
+          TARGET_DATE="${{ github.event.inputs.target_date }}"
+          [ -z "$TARGET_DATE" ] && TARGET_DATE="2026-09-23"
 
-          if [ -n "${{ github.event.inputs.target_date }}" ]; then
-            CMD+=(--date "${{ github.event.inputs.target_date }}")
-          fi
+          DAYS="${{ github.event.inputs.days }}"
+          [ -z "$DAYS" ] && DAYS="15"
 
-          if [ -n "${{ github.event.inputs.days }}" ]; then
-            CMD+=(--days "${{ github.event.inputs.days }}")
-          fi
+          MOVIE="${{ github.event.inputs.movie }}"
+          [ -z "$MOVIE" ] && MOVIE="The Paradise"
 
-          if [ -n "${{ github.event.inputs.movie }}" ]; then
-            CMD+=(--movie "${{ github.event.inputs.movie }}")
-          fi
+          CMD=(python germany.py --mode advance --date "$TARGET_DATE" --days "$DAYS" --movie "$MOVIE")
 
           if [ "${{ github.event.inputs.all_movies }}" = "true" ] || [ "$ALL_MOVIES" = "true" ]; then
             CMD+=(--all-movies)
