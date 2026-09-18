@@ -1,0 +1,118 @@
+name: GCC ALL (Saudi, Bahrain, Oman, UAE)
+
+on:
+  schedule:
+    - cron: '*/40 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: gcc-all-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scrape-gcc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: Saudi Arabia
+            repo: thetextmail007/saudiarabia
+            script: saudi.py
+          - name: Bahrain
+            repo: thetextmail007/bahrain
+            script: bahrain.py
+          - name: Oman
+            repo: thetextmail007/oman
+            script: oman.py
+          - name: UAE
+            repo: thetextmail007/uae
+            script: uae.py
+        mode: [daily, advance]
+
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    steps:
+      - name: Clone Private Repo
+        run: |
+          git clone --depth=1 https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ matrix.target.repo }}.git repo_dir
+
+      - name: Start FlareSolverr Service
+        run: |
+          docker run -d \
+            --name=flaresolverr \
+            -p 8191:8191 \
+            -e LOG_LEVEL=info \
+            --restart unless-stopped \
+            ghcr.io/flaresolverr/flaresolverr:latest
+          echo "Waiting for FlareSolverr to initialize..."
+          sleep 10
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Dependencies
+        run: |
+          cd repo_dir
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests curl_cffi beautifulsoup4 tabulate playwright pycryptodome cryptography python-dateutil pytz cloudscraper aiohttp
+          fi
+          pip install playwright xvfbwrapper || true
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install chromium --with-deps || true
+
+      - name: Run Scraper
+        run: |
+          cd repo_dir
+          echo "🎬 Running ${{ matrix.target.name }} [Mode: ${{ matrix.mode }}]: python ${{ matrix.target.script }} --mode ${{ matrix.mode }}"
+
+          SUCCESS=false
+          for i in {1..6}; do
+            echo "Attempt $i..."
+            if xvfb-run -a python ${{ matrix.target.script }} --mode "${{ matrix.mode }}"; then
+              echo "✅ ${{ matrix.target.name }} scraper finished successfully"
+              SUCCESS=true
+              break
+            fi
+            echo "❌ Attempt $i failed. Retrying in 10 seconds..."
+            sleep 10
+          done
+
+      - name: Commit & Push Data
+        run: |
+          cd repo_dir
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          git rm -rf --cached __pycache__ 2>/dev/null || true
+
+          git add data/ || true
+
+          git commit -m "[skip ci] ${{ matrix.mode }} update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
+
+          sleep $((RANDOM % 10))
+
+          for i in {1..5}; do
+            echo "Push attempt $i"
+            git rebase --abort 2>/dev/null || true
+            git pull --rebase --autostash origin main || true
+            find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+            git rm -rf --cached __pycache__ 2>/dev/null || true
+
+            if git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ matrix.target.repo }}.git; then
+              echo "✅ Push succeeded to ${{ matrix.target.repo }}"
+              break
+            fi
+            echo "❌ Push failed. Retrying in 5 seconds..."
+            sleep 5
+          done
