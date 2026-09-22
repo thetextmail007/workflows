@@ -1,0 +1,180 @@
+name: GCC & EUROPE DAILY (Saudi, Bahrain, Oman, UAE, UK, Ireland, Germany)
+
+on:
+  workflow_dispatch:          # Allows manual trigger
+
+# Prevent overlapping runs (scoped per target country)
+concurrency:
+  group: gcc-europe-daily-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scrape-daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: Saudi Arabia
+            repo: thetextmail007/saudiarabia
+            script: saudi.py
+            folder: saudiarabia
+          - name: Bahrain
+            repo: thetextmail007/bahrain
+            script: bahrain.py
+            folder: Bahrain
+          - name: Oman
+            repo: thetextmail007/oman
+            script: oman.py
+            folder: oman
+          - name: UAE
+            repo: thetextmail007/uae
+            script: uae.py
+            folder: uae
+          - name: UK
+            repo: thetextmail007/uk
+            script: uk.py
+            folder: uk
+          - name: Ireland
+            repo: thetextmail007/ireland
+            script: ireland.py
+            folder: ireland
+          - name: Germany
+            repo: thetextmail007/germany
+            script: germany.py
+            folder: germany
+
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    steps:
+      # 1. Clone Private Target Repository
+      - name: Clone Private Repo
+        run: |
+          git clone --depth=1 https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ matrix.target.repo }}.git repo_dir
+
+      # 2. Start FlareSolverr Service
+      - name: Start FlareSolverr Service
+        run: |
+          docker run -d \
+            --name=flaresolverr \
+            -p 8191:8191 \
+            -e LOG_LEVEL=info \
+            --restart unless-stopped \
+            ghcr.io/flaresolverr/flaresolverr:latest
+          echo "Waiting for FlareSolverr to initialize..."
+          sleep 10
+
+      # 3. Install System Dependencies (xvfb & Google Chrome)
+      - name: Install System Dependencies (xvfb & Google Chrome)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libpangocairo-1.0-0 libxss1 libgtk-3-0 libasound2* || sudo apt-get install -y xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libgbm1 libasound2 libpangocairo-1.0-0 libxss1 libgtk-3-0
+          if ! command -v google-chrome &> /dev/null; then
+            echo "Installing Google Chrome..."
+            wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
+            sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+            sudo apt-get update
+            sudo apt-get install -y google-chrome-stable || true
+          fi
+          google-chrome --version || which google-chrome || true
+
+      # 4. Setup Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 5. Setup Node.js (for Cloudflare bypass modules)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # 6. Install Node dependencies if present
+      - name: Install Node dependencies for Cloudflare bypass
+        run: |
+          cd repo_dir
+          if [ -d "${{ matrix.target.folder }}" ] && [ ! -f "${{ matrix.target.script }}" ]; then
+            cd "${{ matrix.target.folder }}"
+          fi
+          for dir in mcp-chrome-cloudflare-bypass "${{ matrix.target.folder }}/mcp-chrome-cloudflare-bypass"; do
+            if [ -d "$dir" ]; then
+              echo "Installing dependencies in $dir..."
+              (cd "$dir" && npm install --production) || true
+            fi
+          done
+
+      # 7. Install Python dependencies & Playwright
+      - name: Install Python Dependencies
+        run: |
+          cd repo_dir
+          if [ -d "${{ matrix.target.folder }}" ] && [ ! -f "${{ matrix.target.script }}" ]; then
+            cd "${{ matrix.target.folder }}"
+          fi
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt || true
+          fi
+          pip install requests curl_cffi beautifulsoup4 tabulate playwright pycryptodome cryptography python-dateutil pytz cloudscraper aiohttp aiohttp_retry tqdm urllib3 httpx tzdata xvfbwrapper || true
+          python -m playwright install chromium --with-deps || true
+
+      # 8. Run Daily Scraper
+      - name: Run Daily Scraper
+        run: |
+          cd repo_dir
+          if [ -d "${{ matrix.target.folder }}" ] && [ ! -f "${{ matrix.target.script }}" ]; then
+            cd "${{ matrix.target.folder }}"
+          fi
+
+          SCRIPTPATH="${{ matrix.target.script }}"
+          echo "🎬 Running ${{ matrix.target.name }} [Mode: daily]: python $SCRIPTPATH --mode daily"
+
+          SUCCESS=false
+          for i in {1..6}; do
+            echo "▶️ Attempt $i..."
+            if xvfb-run -a python "$SCRIPTPATH" --mode daily; then
+              echo "✅ ${{ matrix.target.name }} scraper finished successfully"
+              SUCCESS=true
+              break
+            fi
+            echo "❌ Attempt $i failed. Retrying in 10 seconds..."
+            sleep 10
+          done
+
+      # 9. Commit & Push Data directly back to target repo
+      - name: Commit & Push Data
+        run: |
+          cd repo_dir
+          if [ -d "${{ matrix.target.folder }}" ] && [ ! -f "${{ matrix.target.script }}" ]; then
+            cd "${{ matrix.target.folder }}"
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Remove bytecode caches
+          find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          git rm -rf --cached __pycache__ 2>/dev/null || true
+
+          git add data/ || git add . || true
+
+          git commit -m "[skip ci] ${{ matrix.target.name }} daily update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
+
+          sleep $((RANDOM % 10))
+
+          for i in {1..5}; do
+            echo "Push attempt $i"
+            git rebase --abort 2>/dev/null || true
+            git pull --rebase --autostash origin main || true
+            find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+            git rm -rf --cached __pycache__ 2>/dev/null || true
+
+            if git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ matrix.target.repo }}.git; then
+              echo "✅ Push succeeded to ${{ matrix.target.repo }}"
+              break
+            fi
+            echo "❌ Push failed. Retrying in 5 seconds..."
+            sleep 5
+          done
