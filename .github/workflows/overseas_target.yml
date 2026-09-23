@@ -163,7 +163,7 @@ jobs:
           git add data/ || git add . || true
 
           RUN_DATE="${{ github.event.inputs.target_date || matrix.date }}"
-          git commit -m "[skip ci] ${{ matrix.target.name }} target date $RUN_DATE update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
+          git commit -m "${{ matrix.target.name }} target date $RUN_DATE update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
 
           sleep $((RANDOM % 10))
 
