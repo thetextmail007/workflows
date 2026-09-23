@@ -160,7 +160,7 @@ jobs:
 
           git add data/ || git add . || true
 
-          git commit -m "[skip ci] ${{ matrix.target.name }} daily update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
+          git commit -m "${{ matrix.target.name }} daily update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
 
           sleep $((RANDOM % 10))
 
