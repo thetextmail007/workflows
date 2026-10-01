@@ -82,7 +82,7 @@ jobs:
         run: |
           if [ -d "germany" ]; then cd germany; fi
 
-          CMD=(python germany.py --mode advance --date "2026-10-02" --days 3)
+          CMD=(python germany.py --mode advance --date "2026-10-08" --days 3)
 
           sudo mkdir -p /tmp/.X11-unix
           sudo chmod 1777 /tmp/.X11-unix
