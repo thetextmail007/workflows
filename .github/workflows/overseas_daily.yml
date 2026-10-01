@@ -87,6 +87,26 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Cache pip downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-3.12-${{ hashFiles('repo_dir/**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-3.12-
+
+      - name: Set browser cache week
+        id: browser-cache-week
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.browser-cache-week.outputs.week }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
       # 5. Setup Node.js (for Cloudflare bypass modules)
       - name: Set up Node.js
         uses: actions/setup-node@v4
