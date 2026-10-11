@@ -31,7 +31,7 @@ jobs:
           - name: UAE
             repo: thetextmail007/uae
             script: uae.py
-        date: ["20260924"]
+        date: ["20261014"]
 
     env:
       PYTHONDONTWRITEBYTECODE: "1"
