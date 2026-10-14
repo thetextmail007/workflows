@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        date: ["20261015"]
+        date: ["20261014"]
 
     env:
       REPO: thetextmail007/uae
