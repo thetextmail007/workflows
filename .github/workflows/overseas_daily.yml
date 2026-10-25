@@ -159,7 +159,7 @@ jobs:
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt || true
           fi
-          pip install requests curl_cffi beautifulsoup4 tabulate playwright pycryptodome cryptography python-dateutil pytz cloudscraper aiohttp aiohttp_retry tqdm urllib3 httpx tzdata xvfbwrapper || true
+          pip install requests curl_cffi beautifulsoup4 tabulate PIL playwright pycryptodome cryptography python-dateutil pytz cloudscraper aiohttp aiohttp_retry tqdm urllib3 httpx tzdata xvfbwrapper || true
           python -m playwright install chromium || true
 
       # 8. Run Daily Scraper
