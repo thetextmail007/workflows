@@ -45,7 +45,7 @@ jobs:
             repo: thetextmail007/germany
             script: germany.py
             folder: germany
-        date: ["202611104"]
+        date: ["20261104"]
 
     env:
       PYTHONDONTWRITEBYTECODE: "1"
