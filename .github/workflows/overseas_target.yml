@@ -173,12 +173,12 @@ jobs:
 
           SCRIPTPATH="${{ matrix.target.script }}"
           RUN_DATE="${{ github.event.inputs.target_date || matrix.date }}"
-          echo "🎬 Running ${{ matrix.target.name }} [Target Date: $RUN_DATE]: python $SCRIPTPATH --mode advance --date $RUN_DATE"
+          echo "🎬 Running ${{ matrix.target.name }} [Target Date: $RUN_DATE]: python $SCRIPTPATH --mode advance --date $RUN_DATE "
 
           SUCCESS=false
           for i in {1..6}; do
             echo "▶️ Attempt $i..."
-            if xvfb-run -a python "$SCRIPTPATH" --mode advance --date "$RUN_DATE" || xvfb-run -a python "$SCRIPTPATH" --date "$RUN_DATE"; then
+            if xvfb-run -a python "$SCRIPTPATH" --mode advance --date "$RUN_DATE" || xvfb-run -a python "$SCRIPTPATH" --date "$RUN_DATE" --days 3; then
               echo "✅ ${{ matrix.target.name }} scraper finished successfully"
               SUCCESS=true
               break
