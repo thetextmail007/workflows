@@ -1,16 +1,14 @@
-name: GCC & EUROPE ADVANCE (Saudi, Bahrain, Oman, UAE, UK, Ireland, Germany)
+name: GCC & EUROPE TARGET DATE (Saudi, Bahrain, Oman, UAE, UK, Ireland, Germany)
 
 on:
-   # Runs every 40 minutes
-  workflow_dispatch:          # Allows manual trigger
-
+  workflow_dispatch:          # Allows manual trigger (hardcoded: 3 days starting 20261118)
+  
 # Prevent overlapping runs (scoped per target country)
 concurrency:
-  group: gcc-europe-advance-${{ github.ref }}
-  cancel-in-progress: true
+  group: gcc-europe-target-${{ github.ref }}
 
 jobs:
-  scrape-advance:
+  scrape-target-date:
     runs-on: ubuntu-latest
     timeout-minutes: 240
 
@@ -46,6 +44,7 @@ jobs:
             repo: thetextmail007/germany
             script: germany.py
             folder: germany
+        date: ["20261118"]
 
     env:
       PYTHONDONTWRITEBYTECODE: "1"
@@ -122,8 +121,8 @@ jobs:
           pip install requests curl_cffi beautifulsoup4 tabulate playwright pycryptodome cryptography python-dateutil pytz cloudscraper aiohttp aiohttp_retry tqdm urllib3 httpx tzdata xvfbwrapper || true
           python -m playwright install chromium --with-deps || true
 
-      # 8. Run Advance Scraper
-      - name: Run Advance Scraper
+      # 8. Run Target Date Scraper
+      - name: Run Target Date Scraper
         run: |
           cd repo_dir
           if [ -d "${{ matrix.target.folder }}" ] && [ ! -f "${{ matrix.target.script }}" ]; then
@@ -131,12 +130,12 @@ jobs:
           fi
 
           SCRIPTPATH="${{ matrix.target.script }}"
-          echo "🎬 Running ${{ matrix.target.name }} [Mode: advance | Date: 20261118 | Days: 3]: python $SCRIPTPATH --mode advance --date 20261118 --days 3"
+          echo "🎬 Running ${{ matrix.target.name }} [Target Date: 20261118 | Days: 3]: python $SCRIPTPATH --mode advance --date 20261118 --days 3"
 
           SUCCESS=false
           for i in {1..6}; do
             echo "▶️ Attempt $i..."
-            if xvfb-run -a python "$SCRIPTPATH" --mode advance --date 20261118 --days 3; then
+            if xvfb-run -a python "$SCRIPTPATH" --mode advance --date 20261118 --days 3 || xvfb-run -a python "$SCRIPTPATH" --date 20261118 --days 3; then
               echo "✅ ${{ matrix.target.name }} scraper finished successfully"
               SUCCESS=true
               break
@@ -161,7 +160,7 @@ jobs:
 
           git add data/ || git add . || true
 
-          git commit -m "[skip ci] ${{ matrix.target.name }} advance update 20261118 (3 days) ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
+          git commit -m "[skip ci] ${{ matrix.target.name }} target date 20261118 (3 days) update ($(date -u +'%Y-%m-%d %H:%M:%S UTC'))" || echo "No changes"
 
           sleep $((RANDOM % 10))
 
