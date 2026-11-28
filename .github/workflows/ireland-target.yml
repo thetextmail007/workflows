@@ -1,8 +1,7 @@
 name: IRELAND TARGET DATE
 
 on:
-  schedule:
-    - cron: '0/40 * * * *'   # runs every 4 hours
+   # runs every 4 hours
   workflow_dispatch:
   
 
