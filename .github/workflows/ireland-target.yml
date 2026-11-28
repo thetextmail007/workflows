@@ -19,7 +19,7 @@ jobs:
 
     env:
       REPO: thetextmail007/ireland
-      TARGET_DATE: ${{ github.event.inputs.target_date || '20261105' }}
+      TARGET_DATE: ${{ github.event.inputs.target_date || '20261203' }}
       DAYS: ${{ github.event.inputs.days || '2' }}
       PYTHONDONTWRITEBYTECODE: "1"
 
